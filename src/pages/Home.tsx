@@ -1,24 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence,
-    type Auth } from 'firebase/auth';
-import { getFirestore, addDoc, onSnapshot, collection, query, Firestore, QuerySnapshot } from 'firebase/firestore';
-// We must declare L as a global variable since Leaflet is loaded via CDN (see below)
-declare const L: typeof import('leaflet') | undefined;
+import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, type Auth, signInWithCustomToken, type User } from 'firebase/auth';
+import { getFirestore, addDoc, onSnapshot, collection, query, deleteDoc, doc, Firestore, Query } from 'firebase/firestore';
 
-// --- GLOBAL CONFIG ---
-const AUTHORIZATION_KEY = "memorykey"; // The secret key the family will share to authorize posting
 
-// --- Global Variables (Assumed to be available in the environment) ---
-declare const __app_id: string | undefined;
-declare const __firebase_config: string | undefined;
-declare const __initial_auth_token: string | undefined;
-
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-// --- TypeScript Interfaces ---
+declare const L: any;
+// --- TYPE DEFINITIONS ---
 
 interface Location {
     lat: number;
@@ -33,19 +20,50 @@ interface Memory {
     timestamp: number;
 }
 
-// --- Firebase and Map Instance Refs ---
-const firebaseInstances = {
-    db: null as Firestore | null,
-    auth: null as Auth | null,
+// NOTE on Leaflet: Since Leaflet is loaded dynamically, we use 'any' for Leaflet-specific types (L.Map, L.Marker, etc.)
+// to avoid requiring full external @types/leaflet definitions in a single-file environment.
+type LeafletMap = any;
+type LeafletLayer = any;
+
+// --- CONFIGURATION ---
+
+// Authorization Key (For posting memories - CHANGE THIS SECRET KEY)
+const AUTHORIZATION_KEY = "local-test-auth-key-12345";
+
+// Firebase Configuration (Replace the empty strings with your actual Firebase project credentials)
+const firebaseConfig = {
+    // Keys are now sourced from process.env (e.g., REACT_APP_FIREBASE_API_KEY)
+    // IMPORTANT: When running locally, ensure you set these environment variables in your .env file.
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+    appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
 };
+
+
+// Application ID (Used for Firestore path - defaults to project ID or a fallback string)
+const appId: string = firebaseConfig.projectId || "memory-map-default";
+
+// Auth Token (set to null as it is not provided externally)
+const initialAuthToken: string | null = null;
+
+// --- Firebase and Map Instance Refs ---
+const firebaseInstances: { db: Firestore | null, auth: Auth | null } = {
+    db: null,
+    auth: null,
+};
+
 
 // --- Custom Leaflet Icons (Base64 SVG) ---
 
 const createIcons = () => {
+    // Check if Leaflet (L) is loaded
     if (typeof L === 'undefined') return { tempIcon: null, memorialIcon: null };
 
     // Custom icon for the temporary marker (Blue Plus)
-    const tempIcon = new L.Icon({
+    const tempIcon = new (L as any).Icon({
         iconUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="%233b82f6" stroke-width="2"><circle cx="16" cy="16" r="14" fill="%233b82f6" stroke="white" stroke-width="3"/><path d="M16 8v16M8 16h16" stroke="white" stroke-width="3"/></svg>',
         iconSize: [32, 32],
         iconAnchor: [16, 32],
@@ -53,7 +71,7 @@ const createIcons = () => {
     });
 
     // Custom icon for the permanent memorial pin (Dark Purple drop for contrast on light map)
-    const memorialIcon = new L.Icon({
+    const memorialIcon = new (L as any).Icon({
         iconUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%235b21b6" stroke="%23ffffff" stroke-width="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zM12 11.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>',
         iconSize: [38, 38],
         iconAnchor: [19, 38],
@@ -66,7 +84,7 @@ const createIcons = () => {
 
 // --- Main React Component ---
 const App: React.FC = () => {
-    // --- State Management ---
+    // --- State Management (Explicitly Typed) ---
     const [userId, setUserId] = useState<string | null>(null);
     const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
     const [isMapLoaded, setIsMapLoaded] = useState<boolean>(false);
@@ -74,66 +92,85 @@ const App: React.FC = () => {
     const [memoryText, setMemoryText] = useState<string>('');
     const [memories, setMemories] = useState<Memory[]>([]);
     const [isSaving, setIsSaving] = useState<boolean>(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // --- Authorization State ---
     const [isAuthorizedToPost, setIsAuthorizedToPost] = useState<boolean>(false);
     const [authKeyInput, setAuthKeyInput] = useState<string>('');
     const [authMessage, setAuthMessage] = useState<string>('Enter the family key to add new pins.');
 
-    // --- Refs for Leaflet Instances ---
-    const mapRef = useRef<import('leaflet').Map | null>(null);
-    const markerLayerRef = useRef<import('leaflet').LayerGroup | null>(null);
-    const tempMarkerRef = useRef<import('leaflet').Marker | null>(null);
+    // --- Refs for Leaflet Instances (Typed as LeafletMap/Layer) ---
+    const mapRef = useRef<LeafletMap | null>(null);
+    const markerLayerRef = useRef<LeafletLayer | null>(null);
+    const tempMarkerRef = useRef<LeafletLayer | null>(null);
 
     // --- 1. FIREBASE INITIALIZATION & AUTHENTICATION ---
     useEffect(() => {
-        try {
-            const app = initializeApp(firebaseConfig);
-            firebaseInstances.db = getFirestore(app);
-            firebaseInstances.auth = getAuth(app);
+        const initFirebase = async () => {
+            try {
+                // 1. Initialize Firebase App
+                const app = initializeApp(firebaseConfig);
+                firebaseInstances.db = getFirestore(app);
+                firebaseInstances.auth = getAuth(app);
 
-            setPersistence(firebaseInstances.auth, browserSessionPersistence);
+                // 2. Set persistence and sign-in
+                const authInstance: Auth = firebaseInstances.auth;
+                if (!authInstance) return;
 
-            const unsubscribe = onAuthStateChanged(firebaseInstances.auth, async (user) => {
-                if (user) {
-                    setUserId(user.uid);
-                    setIsAuthReady(true);
+                await setPersistence(authInstance, browserSessionPersistence);
+
+                if (initialAuthToken) {
+                    // Correct use of modular function API with Auth instance
+                    await signInWithCustomToken(authInstance, initialAuthToken);
                 } else {
-                    try {
-                        if (initialAuthToken && firebaseInstances.auth) {
-                            await signInWithCustomToken(firebaseInstances.auth, initialAuthToken);
-                        } else if (firebaseInstances.auth) {
-                            await signInAnonymously(firebaseInstances.auth);
-                        }
-                    } catch (error) {
-                        console.error("Firebase Auth Error:", error);
-                    }
+                    await signInAnonymously(authInstance);
                 }
-            });
 
-            return () => unsubscribe();
-        } catch (error) {
-            console.error("Firebase Initialization Failed:", error);
-        }
+                // 3. Set up Auth State Listener
+                const unsubscribe = onAuthStateChanged(authInstance, (user: User | null) => {
+                    if (user) {
+                        setUserId(user.uid);
+                    } else {
+                        // Fallback to random ID if auth somehow fails
+                        setUserId(crypto.randomUUID());
+                    }
+                    setIsAuthReady(true);
+                });
+
+                return () => unsubscribe();
+            } catch (error) {
+                console.error("Firebase Initialization or Auth Failed:", error);
+                setIsAuthReady(true);
+                setErrorMessage("Failed to connect to Firebase. Check console for configuration errors.");
+            }
+        };
+        initFirebase();
     }, []);
 
-    // --- 2. DYNAMIC LEAFLET LOADING (Fix for L.map is not a function error) ---
+    // Auto-clear error message after 5 seconds
+    useEffect(() => {
+        if (errorMessage) {
+            const timer = setTimeout(() => {
+                setErrorMessage(null);
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [errorMessage]);
+
+    // --- 2. DYNAMIC LEAFLET LOADING ---
     useEffect(() => {
         // Function to dynamically load Leaflet CSS
-        const loadLeafletCss = () => {
+        const loadLeafletCss = (): void => {
             if (document.querySelector('link[href*="leaflet.css"]')) return;
             const link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-            link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-            link.crossOrigin = '';
             document.head.appendChild(link);
         };
 
         // Function to dynamically load Leaflet JS
-        const loadLeafletJs = () => {
-            // Check if Leaflet and its map function are already available
-            if (typeof L !== 'undefined' && typeof L.map === 'function') {
+        const loadLeafletJs = (): void => {
+            if (typeof L !== 'undefined' && typeof (L as any).map === 'function') {
                 setIsMapLoaded(true);
                 return;
             }
@@ -141,22 +178,16 @@ const App: React.FC = () => {
 
             const script = document.createElement('script');
             script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-            script.integrity = 'sha256-20n6cT8x32mN/ZQV9E1FwH5rB/iL8bJc+j7T3s1+A9I=';
-            script.crossOrigin = '';
             script.async = false;
 
-            // Add a small delay on load to ensure the browser has finished executing the script
-            // and registering all properties (like L.map) on the global L object.
             script.onload = () => {
-                // Increased delay from 50ms to 300ms to allow more time for Leaflet to fully initialize
-                // within the Canvas preview environment, resolving the map loading issue.
                 setTimeout(() => {
-                    if (typeof L !== 'undefined' && typeof L.map === 'function') {
+                    if (typeof L !== 'undefined' && typeof (L as any).map === 'function') {
                         setIsMapLoaded(true);
                     } else {
                         console.error("Leaflet script loaded, but L.map is still unavailable.");
                     }
-                }, 300);
+                }, 750);
             };
             document.head.appendChild(script);
         };
@@ -167,10 +198,9 @@ const App: React.FC = () => {
 
     // --- 3. MAP SETUP & CLICK HANDLER ---
 
-    const handleMapClick = useCallback((e: import('leaflet').LeafletMouseEvent) => {
+    const handleMapClick = useCallback((e: any): void => { // e is a Leaflet MouseEvent object
         if (typeof L === 'undefined' || !mapRef.current) return;
 
-        // Only allow map clicking to set a location if the user is authorized to post
         if (!isAuthorizedToPost) {
             setAuthMessage("You must be authorized to select a location for a new pin.");
             return;
@@ -188,33 +218,32 @@ const App: React.FC = () => {
         }
 
         // 2. Add a new temporary marker for the selected spot
-        tempMarkerRef.current = L.marker(e.latlng, { icon: tempIcon! }).addTo(mapRef.current);
+        tempMarkerRef.current = (L as any).marker(e.latlng, { icon: tempIcon }).addTo(mapRef.current);
 
         // 3. Pan to the clicked location
         mapRef.current.panTo(e.latlng);
-    }, [isAuthorizedToPost]); // Dependency on isAuthorizedToPost
+    }, [isAuthorizedToPost]);
 
-    const setupMap = useCallback(() => {
-        // Strict check to ensure L and L.map are available before proceeding
-        if (mapRef.current || typeof L === 'undefined' || typeof L.map !== 'function') return;
+    const setupMap = useCallback((): void => {
+        if (mapRef.current || typeof L === 'undefined' || typeof (L as any).map !== 'function') return;
 
         // Initialize Map
-        const map = L.map('map').setView([20, 0], 2); // Center map globally
+        const map = (L as any).map('map').setView([20, 0], 2);
         mapRef.current = map;
 
-        // Light Tile Layer (Standard OpenStreetMap)
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Tile Layer
+        (L as any).tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             maxZoom: 19
         }).addTo(map);
 
         // Add Layer Group for saved markers
-        markerLayerRef.current = new L.LayerGroup().addTo(map);
+        markerLayerRef.current = new (L as any).LayerGroup().addTo(map);
 
         // Add map click listener
         map.on('click', handleMapClick);
 
-        // Add a handler for map resize/repositioning on initial load
+        // Invalidate size to ensure it fills the container correctly
         setTimeout(() => map.invalidateSize(), 100);
 
     }, [handleMapClick]);
@@ -230,24 +259,38 @@ const App: React.FC = () => {
     // --- 4. FIREBASE HELPER FUNCTIONS & CRUD ---
 
     const getMemoryCollectionRef = useCallback(() => {
-        if (!firebaseInstances.db || !userId) return null;
-        // Public collection path for shared memories (read access for all)
-        const collectionPath = `artifacts/${appId}/public/data/memories`;
+        if (!firebaseInstances.db) return null;
+        const collectionPath: string = `artifacts/${appId}/public/data/memories`;
         return collection(firebaseInstances.db, collectionPath);
-    }, [userId]);
+    }, [appId]);
 
-    const checkAuthorizationKey = () => {
+    const checkAuthorizationKey = (): void => {
         if (authKeyInput === AUTHORIZATION_KEY) {
             setIsAuthorizedToPost(true);
             setAuthMessage('Authorization successful! You can now select a location on the map to add a memory pin.');
-            setAuthKeyInput(''); // Clear the input
+            setAuthKeyInput('');
+            setErrorMessage(null);
         } else {
             setAuthMessage('Invalid key. Please try again.');
         }
     };
 
-    const addMemory = async () => {
-        // Enforce authorization check before writing to the database
+    const deleteMemory = async (id: string): Promise<void> => {
+        const db = firebaseInstances.db;
+        if (!db) return;
+
+        const docRef = doc(db, `artifacts/${appId}/public/data/memories`, id);
+
+        try {
+            await deleteDoc(docRef);
+            console.log(`Memory ${id} successfully deleted.`);
+        } catch (e) {
+            console.error("Error deleting document: ", e);
+            setErrorMessage("Failed to delete memory pin. Check console and ensure you are authorized.");
+        }
+    };
+
+    const addMemory = async (): Promise<void> => {
         if (!tempLocation || !memoryText.trim() || !isAuthReady || isSaving || !userId || !isAuthorizedToPost) return;
 
         const memoriesCollection = getMemoryCollectionRef();
@@ -269,6 +312,7 @@ const App: React.FC = () => {
             // Clear temporary state and UI on success
             setTempLocation(null);
             setMemoryText('');
+            setErrorMessage(null);
             if (mapRef.current && tempMarkerRef.current) {
                 mapRef.current.removeLayer(tempMarkerRef.current);
                 tempMarkerRef.current = null;
@@ -276,7 +320,7 @@ const App: React.FC = () => {
 
         } catch (e) {
             console.error("Error adding document: ", e);
-            console.error("Failed to save memory. See console for details.");
+            setErrorMessage("Failed to save memory pin. Please try again.");
         } finally {
             setIsSaving(false);
         }
@@ -291,21 +335,20 @@ const App: React.FC = () => {
         const memoriesCollection = getMemoryCollectionRef();
         if (!memoriesCollection) return;
 
-        const q = query(memoriesCollection);
+        const q: Query<Memory> = query(memoriesCollection) as Query<Memory>;
 
         // Set up the real-time listener
-        const unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot) => {
+        const unsubscribe = onSnapshot(q, (snapshot) => {
             const newMemories: Memory[] = [];
             snapshot.forEach((doc) => {
-                // Cast the data to the Memory interface
-                const data = doc.data();
+                const data = doc.data() as Memory; // Cast data to Memory type
                 newMemories.push({
                     id: doc.id,
                     story: data.story,
                     location: data.location,
                     contributorId: data.contributorId,
                     timestamp: data.timestamp,
-                } as Memory);
+                });
             });
             setMemories(newMemories);
 
@@ -313,23 +356,21 @@ const App: React.FC = () => {
             console.error("Error listening to memories:", error);
         });
 
-        // Cleanup the listener when the component unmounts or dependencies change
         return () => unsubscribe();
     }, [isAuthReady, isMapLoaded, getMemoryCollectionRef]);
 
 
     useEffect(() => {
-        if (!mapRef.current || !markerLayerRef.current || !L) return;
+        if (!mapRef.current || !markerLayerRef.current || typeof L === 'undefined') return;
 
         markerLayerRef.current.clearLayers(); // Clear existing markers
         const { memorialIcon } = createIcons();
 
         memories.forEach(memory => {
             const { lat, lng } = memory.location;
-            const date = memory.timestamp ? new Date(memory.timestamp).toLocaleDateString() : 'Date Unknown';
+            const date: string = memory.timestamp ? new Date(memory.timestamp).toLocaleDateString() : 'Date Unknown';
 
-            // Create the content for the popup window
-            const popupContent = `
+            let popupContent: string = `
                 <div class="p-2 text-gray-800 font-sans">
                     <h3 class="font-bold text-lg mb-1">A Memory Shared</h3>
                     <p class="mb-2 text-sm italic">${memory.story.replace(/\n/g, '<br>')}</p>
@@ -337,30 +378,64 @@ const App: React.FC = () => {
                     <p class="text-xs text-gray-600">
                         Marked on: <span class="font-medium">${date}</span>
                     </p>
-                </div>
             `;
 
-            L.marker([lat, lng], { icon: memorialIcon! })
+            if (isAuthorizedToPost) {
+                popupContent += `
+                    <button 
+                        id="delete-pin-${memory.id}" 
+                        class="mt-3 w-full py-2 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition duration-150 shadow-md"
+                    >
+                        Delete Pin
+                    </button>
+                `;
+            }
+            popupContent += `</div>`;
+
+
+            const marker = (L as any).marker([lat, lng], { icon: memorialIcon })
                 .bindPopup(popupContent, { maxWidth: 300 })
-                .addTo(markerLayerRef.current!);
+                .addTo(markerLayerRef.current);
+
+            // Handle the click event for the delete button *after* the popup opens
+            marker.on('popupopen', () => {
+                if (isAuthorizedToPost) {
+                    const deleteButton = document.getElementById(`delete-pin-${memory.id}`);
+                    if (deleteButton) {
+                        deleteButton.onclick = () => deleteMemory(memory.id);
+                    }
+                }
+            });
         });
-    }, [memories]);
+    }, [memories, isAuthorizedToPost]);
 
 
     // --- UI Rendering Logic ---
 
-    const selectedLocationText = tempLocation
+    const selectedLocationText: string = tempLocation
         ? `Selected: Lat ${tempLocation.lat.toFixed(4)}, Lng ${tempLocation.lng.toFixed(4)}`
         : 'No location selected. Click the map!';
 
     // Show a loading message while Leaflet is being fetched
-    const loadingMap = !mapRef.current && isAuthReady && !isMapLoaded;
-    const loadingAuth = !isAuthReady;
+    const loadingMap: boolean = !mapRef.current && isAuthReady && !isMapLoaded;
+    const loadingAuth: boolean = !isAuthReady;
 
 
     return (
         <div className="min-h-screen bg-gray-100 flex flex-col items-center p-4 sm:p-8">
             <div className="w-full max-w-6xl space-y-6">
+
+                {/* New Error Message Display */}
+                {errorMessage && (
+                    <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex justify-between items-center" role="alert">
+                        <p className="font-bold">Error:</p>
+                        <p className="ml-3">{errorMessage}</p>
+                        <button onClick={() => setErrorMessage(null)} className="ml-auto text-red-500 hover:text-red-700 font-bold">
+                            &times;
+                        </button>
+                    </div>
+                )}
+
                 <header className="text-center pb-4 border-b border-gray-300">
                     <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">
                         <span className="text-purple-700">Memory Map</span> of a Life Well Lived
@@ -382,42 +457,39 @@ const App: React.FC = () => {
                     <div className="bg-white p-6 rounded-xl shadow-xl border border-gray-200 space-y-4">
                         <h2 className="text-2xl font-bold text-red-600">Authorization Required to Post</h2>
                         <p className="text-gray-700">{authMessage}</p>
-                        <div className="flex space-x-2">
+                        <form className="flex space-x-2" onSubmit={(e: React.FormEvent) => { e.preventDefault(); checkAuthorizationKey(); }}>
                             <input
                                 type="password"
                                 value={authKeyInput}
-                                onChange={(e) => {
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                     setAuthKeyInput(e.target.value);
                                     setAuthMessage('Enter the family key to add new pins.'); // Reset message on change
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') { checkAuthorizationKey(); }
                                 }}
                                 placeholder="Enter Secret Family Key"
                                 className="flex-grow p-3 rounded-lg bg-gray-200 text-gray-800 placeholder-gray-500 border border-gray-300 focus:ring-2 focus:ring-red-500 focus:outline-none transition duration-150"
                             />
                             <button
-                                onClick={checkAuthorizationKey}
+                                type="submit"
+                                disabled={authKeyInput.length === 0}
                                 className="px-5 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition duration-150 disabled:opacity-50"
-                                disabled={authKeyInput.trim().length === 0}
                             >
                                 Authorize
                             </button>
-                        </div>
+                        </form>
                     </div>
                 )}
 
                 {/* Location Entry Form (Visible when tempLocation is set AND authorized) */}
                 {tempLocation && isAuthorizedToPost && (
                     <div id="memoryFormCard" className="bg-white p-6 rounded-xl shadow-xl border border-gray-200 space-y-4 transition-all duration-300">
-                        <h2 className="text-2xl font-bold text-purple-700">Share a Memory at This Location</h2>
+                        <h2 className="2xl font-bold text-purple-700">Share a Memory at This Location</h2>
                         <div id="selectedLocation" className="text-sm text-gray-600">{selectedLocationText}</div>
 
                         <textarea
                             id="memoryText"
                             rows={3}
                             value={memoryText}
-                            onChange={(e) => setMemoryText(e.target.value)}
+                            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMemoryText(e.target.value)}
                             placeholder="Write the story, the date, and the memory of spreading the ashes here..."
                             className="w-full p-3 rounded-lg bg-gray-200 text-gray-800 placeholder-gray-500 border border-gray-300 focus:ring-2 focus:ring-purple-500 focus:outline-none transition duration-150 resize-none"
                         />
@@ -435,7 +507,7 @@ const App: React.FC = () => {
                 {/* User Info Display */}
                 <div className="text-xs text-gray-400 text-center pt-4">
                     <span className="font-mono break-all">
-                        {isAuthReady ? `Contributor ID: ${userId}` : 'Authenticating...'}
+                        {isAuthReady ? `Contributor ID: ${userId || 'N/A'}` : 'Authenticating...'}
                     </span>
                 </div>
             </div>
