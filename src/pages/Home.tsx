@@ -1,16 +1,33 @@
-// Global variables provided by the Canvas environment (declared for TypeScript safety)
-declare const __firebase_config: string | undefined;
-declare const __app_id: string | undefined;
-declare const __initial_auth_token: string | undefined;
-
-// Declare the global Leaflet object to resolve "Cannot find name L" TypeScript error.
-declare const L: any;
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, type Auth, signInWithCustomToken, type User } from 'firebase/auth';
-import { getFirestore, addDoc, onSnapshot, collection, query, deleteDoc, doc, updateDoc, Firestore, Query, type DocumentData, CollectionReference } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence, type Auth, type User } from 'firebase/auth';
+import { getFirestore, addDoc, onSnapshot, collection, query, deleteDoc, doc, updateDoc, type Firestore, type Query, type DocumentData, type CollectionReference } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, type FirebaseStorage } from 'firebase/storage';
+import { ArrowLeft, ArrowRight, X } from 'lucide-react'; // Using lucide-react for icons
+
+// --- GLOBAL LEAFLET DECLARATION (assumed to be loaded via <script> tags) ---
+declare const L: any;
+
+// --- CONFIGURATION ---
+
+// IMPORTANT: Replace these placeholder strings with your actual Firebase project credentials
+const firebaseConfig = {
+    // These values should be provided in your .env file
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
+};
+
+
+// Application ID used for Firestore paths (acts as the root namespace)
+const LOCAL_APP_ID = "memory-map-v1";
+
+// Authorization Key (For posting memories - CHANGE THIS SECRET KEY)
+const AUTHORIZATION_KEY = import.meta.env.VITE_FIREBASE_AUTH_KEY;
+
 
 // --- TYPE DEFINITIONS ---
 
@@ -31,33 +48,15 @@ interface Memory {
 type LeafletMap = any;
 type LeafletLayer = any;
 
-// --- CONFIGURATION ---
-
-// Authorization Key (For posting memories - CHANGE THIS SECRET KEY)
-const AUTHORIZATION_KEY = "local-test-auth-key-12345";
-
-// Firebase Configuration (Replace the placeholder strings with your actual Firebase project credentials for LOCAL RUNNING)
-const firebaseConfig = {
-    // Keys are now sourced from process.env (e.g., REACT_APP_FIREBASE_API_KEY)
-    // IMPORTANT: When running locally, ensure you set these environment variables in your .env file.
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-    appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
-};
-
-
-// --- Firebase and Map Instance Refs ---
+// --- Firebase Instance Refs ---
 const firebaseInstances: { db: Firestore | null, auth: Auth | null, storage: FirebaseStorage | null } = {
     db: null,
     auth: null,
     storage: null,
 };
 
-// --- Custom Leaflet Icons (Base64 SVG) ---
 
+// --- Custom Leaflet Icons (Base64 SVG) ---
 const createIcons = () => {
     if (typeof L === 'undefined') return { tempIcon: null, memorialIcon: null };
 
@@ -78,13 +77,122 @@ const createIcons = () => {
     return { tempIcon, memorialIcon };
 };
 
+// --- Image Modal Component ---
+interface ImageModalProps {
+    imageUrls: string[] | null;
+    onClose: () => void;
+}
+
+const ImageModal: React.FC<ImageModalProps> = ({ imageUrls, onClose }) => {
+    // --- HOOKS MUST BE UNCONDITIONAL ---
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const totalImages = imageUrls?.length || 0;
+
+    // Memoize navigation functions
+    const goToPrevious = useCallback(() => {
+        setCurrentIndex((prevIndex) => (prevIndex === 0 ? totalImages - 1 : prevIndex - 1));
+    }, [totalImages]);
+
+    const goToNext = useCallback(() => {
+        setCurrentIndex((prevIndex) => (prevIndex === totalImages - 1 ? 0 : prevIndex + 1));
+    }, [totalImages]);
+
+    // Reset index when images change (e.g., modal opens with new content)
+    useEffect(() => {
+        setCurrentIndex(0);
+    }, [totalImages]);
+
+    // Keyboard navigation logic
+    useEffect(() => {
+        // Conditional logic now happens *inside* the hook, not outside
+        if (totalImages === 0) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowRight') goToNext();
+            if (e.key === 'ArrowLeft') goToPrevious();
+            if (e.key === 'Escape') onClose();
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [goToNext, goToPrevious, onClose, totalImages]);
+    // --- END HOOKS ---
+
+    // Conditional Return (AFTER all hooks)
+    if (totalImages === 0) return null;
+
+    // Use non-null assertion since we've checked totalImages > 0
+    const currentUrl = imageUrls![currentIndex];
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm p-4"
+            onClick={onClose}
+        >
+            {/* Close Button */}
+            <button
+                className="absolute top-4 right-4 text-white hover:text-red-400 transition duration-150 p-2 rounded-full z-50 bg-black/50"
+                onClick={onClose}
+                aria-label="Close Image Viewer"
+            >
+                <X size={32} />
+            </button>
+
+            <div className="relative max-w-7xl w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+
+                {/* Previous Button */}
+                {totalImages > 1 && (
+                    <button
+                        className="absolute left-0 lg:-left-16 p-3 bg-white/20 hover:bg-white/40 text-white rounded-full transition duration-150 transform hover:scale-110 shadow-lg z-10"
+                        onClick={goToPrevious}
+                        aria-label="Previous Image"
+                    >
+                        <ArrowLeft size={32} />
+                    </button>
+                )}
+
+                {/* Main Image Container */}
+                <div className="max-w-full max-h-full flex flex-col items-center justify-center">
+                    <img
+                        src={currentUrl}
+                        alt={`Memory photo ${currentIndex + 1} of ${totalImages}`}
+                        className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+                        onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.onerror = null;
+                            target.src = 'https://placehold.co/600x400/DC2626/FFFFFF?text=Image+Load+Failed';
+                        }}
+                    />
+
+                    {/* Index Counter */}
+                    {totalImages > 1 && (
+                        <div className="absolute bottom-4 text-white text-lg font-mono bg-black/50 px-4 py-2 rounded-full">
+                            {currentIndex + 1} / {totalImages}
+                        </div>
+                    )}
+                </div>
+
+                {/* Next Button */}
+                {totalImages > 1 && (
+                    <button
+                        className="absolute right-0 lg:-right-16 p-3 bg-white/20 hover:bg-white/40 text-white rounded-full transition duration-150 transform hover:scale-110 shadow-lg z-10"
+                        onClick={goToNext}
+                        aria-label="Next Image"
+                    >
+                        <ArrowRight size={32} />
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
 
 // --- Main React Component ---
 const App: React.FC = () => {
     // --- State Management ---
     const [userId, setUserId] = useState<string | null>(null);
     const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
-    // Reverting to setIsMapLoaded as the issue was the internal loading logic, not the declaration.
     const [isMapLoaded, setIsMapLoaded] = useState<boolean>(false);
     const [tempLocation, setTempLocation] = useState<Location | null>(null);
     const [memoryText, setMemoryText] = useState<string>('');
@@ -92,6 +200,9 @@ const App: React.FC = () => {
     const [memories, setMemories] = useState<Memory[]>([]);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    // --- Image Viewer State (for the Modal) ---
+    const [selectedImageUrls, setSelectedImageUrls] = useState<string[] | null>(null);
 
     // --- Authorization State ---
     const [isAuthorizedToPost, setIsAuthorizedToPost] = useState<boolean>(false);
@@ -109,38 +220,30 @@ const App: React.FC = () => {
     const markerLayerRef = useRef<LeafletLayer | null>(null);
     const tempMarkerRef = useRef<LeafletLayer | null>(null);
 
-    const getAppId = () => typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-
-    // --- 1. FIREBASE INITIALIZATION & AUTHENTICATION ---
+    // --- 1. FIREBASE INITIALIZATION & ANONYMOUS AUTHENTICATION ---
     useEffect(() => {
         const initFirebase = async () => {
             try {
-                const config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
-
-                // 1. Initialize Firebase App
-                const app = initializeApp(config);
+                // 1. Initialize Firebase App using local config
+                const app = initializeApp(firebaseConfig);
                 firebaseInstances.db = getFirestore(app);
                 firebaseInstances.auth = getAuth(app);
                 firebaseInstances.storage = getStorage(app);
 
-                // 2. Set persistence and sign-in
+                // 2. Set persistence and sign-in anonymously
                 const authInstance: Auth = firebaseInstances.auth;
                 if (!authInstance) return;
 
                 await setPersistence(authInstance, browserSessionPersistence);
-
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(authInstance, __initial_auth_token);
-                } else {
-                    await signInAnonymously(authInstance);
-                }
+                await signInAnonymously(authInstance);
 
                 // 3. Set up Auth State Listener
                 const unsubscribe = onAuthStateChanged(authInstance, (user: User | null) => {
                     if (user) {
                         setUserId(user.uid);
                     } else {
+                        // Fallback to random ID if anonymous sign-in fails or user is null
                         setUserId(crypto.randomUUID());
                     }
                     setIsAuthReady(true);
@@ -182,11 +285,11 @@ const App: React.FC = () => {
         const storage = firebaseInstances.storage;
         if (!storage || files.length === 0) return [];
 
-        const appId = getAppId();
         const urls: string[] = [];
 
         for (const file of files) {
-            const path = `artifacts/${appId}/memories/${memoryId}/${file.name}_${Date.now()}`;
+            // Storage path uses the local APP ID
+            const path = `artifacts/${LOCAL_APP_ID}/memories/${memoryId}/${file.name}_${Date.now()}`;
             const fileRef = storageRef(storage, path);
 
             await uploadBytes(fileRef, file);
@@ -201,8 +304,8 @@ const App: React.FC = () => {
 
     const getMemoryCollectionRef = useCallback((): CollectionReference<DocumentData> | null => {
         if (!firebaseInstances.db) return null;
-        const appId = getAppId();
-        const collectionPath: string = `artifacts/${appId}/public/data/memories`;
+        // Firestore path uses the local APP ID
+        const collectionPath: string = `artifacts/${LOCAL_APP_ID}/public/data/memories`;
         return collection(firebaseInstances.db, collectionPath);
     }, []);
 
@@ -222,8 +325,8 @@ const App: React.FC = () => {
         const db = firebaseInstances.db;
         if (!db) return;
 
-        const appId = getAppId();
-        const docRef = doc(db, `artifacts/${appId}/public/data/memories`, id);
+        // Document path uses the local APP ID
+        const docRef = doc(db, `artifacts/${LOCAL_APP_ID}/public/data/memories`, id);
 
         try {
             await deleteDoc(docRef);
@@ -329,7 +432,7 @@ const App: React.FC = () => {
 
     }, [handleMapClick]);
 
-    // Dynamic Leaflet Loading and Initialization
+    // Dynamic Leaflet Loading and Initialization (Ensure Leaflet CSS/JS are loaded)
     useEffect(() => {
         // Function to dynamically load Leaflet CSS
         const loadLeafletCss = (): void => {
@@ -353,7 +456,6 @@ const App: React.FC = () => {
             script.async = false;
 
             script.onload = () => {
-                // Immediate check and state update upon script load (removed the timeout)
                 if (typeof L !== 'undefined' && typeof L.map === 'function') {
                     setIsMapLoaded(true);
                 } else {
@@ -374,7 +476,7 @@ const App: React.FC = () => {
         }
     }, [isAuthReady, isMapLoaded, setupMap]);
 
-    // Real-time Listener and Marker Rendering
+    // Real-time Listener for Memories
     useEffect(() => {
         if (!isAuthReady || !isMapLoaded) return;
 
@@ -406,6 +508,7 @@ const App: React.FC = () => {
     }, [isAuthReady, isMapLoaded, getMemoryCollectionRef]);
 
 
+    // Marker Rendering Effect (Includes 'View Photos' button logic)
     useEffect(() => {
         if (!mapRef.current || !markerLayerRef.current || typeof L === 'undefined') return;
 
@@ -416,18 +519,15 @@ const App: React.FC = () => {
             const { lat, lng } = memory.location;
             const date: string = memory.timestamp ? new Date(memory.timestamp).toLocaleDateString() : 'Date Unknown';
 
-            // Generate HTML for images
+            // Generate HTML for the 'View Photos' button
             const imageHtml = memory.imageUrls.length > 0
-                ? `<div class="grid grid-cols-2 gap-2 mt-3 mb-3 border-t pt-2 border-gray-200">
-                    ${memory.imageUrls.slice(0, 4).map(url => `
-                        <img 
-                            src="${url}" 
-                            alt="Memory photo" 
-                            class="w-full h-auto object-cover rounded-lg shadow-md aspect-square"
-                            onerror="this.onerror=null;this.src='https://placehold.co/100x100/FEE2E2/DC2626?text=Image+Failed';"
-                        />
-                    `).join('')}
-                    ${memory.imageUrls.length > 4 ? '<p class="text-xs text-gray-500 col-span-2 mt-1">and more photos...</p>' : ''}
+                ? `<div class="mt-3 mb-3 border-t pt-2 border-gray-200">
+                    <button 
+                        id="view-images-pin-${memory.id}" 
+                        class="w-full py-2 bg-purple-600 text-white text-sm font-semibold rounded-lg hover:bg-purple-700 transition duration-150 shadow-md"
+                    >
+                        View ${memory.imageUrls.length} Photo${memory.imageUrls.length !== 1 ? 's' : ''}
+                    </button>
                    </div>`
                 : '';
 
@@ -462,11 +562,21 @@ const App: React.FC = () => {
                 .addTo(markerLayerRef.current);
 
             marker.on('popupopen', () => {
+                // Attach event listener for the Delete button
                 if (isAuthorizedToPost) {
                     const deleteButton = document.getElementById(`delete-pin-${memory.id}`);
                     if (deleteButton) {
                         deleteButton.onclick = () => deleteMemory(memory.id);
                     }
+                }
+
+                // Attach event listener for the View Images button
+                const viewImagesButton = document.getElementById(`view-images-pin-${memory.id}`);
+                if (viewImagesButton) {
+                    viewImagesButton.onclick = () => {
+                        // This sets the React state, which triggers the modal render
+                        setSelectedImageUrls(memory.imageUrls);
+                    };
                 }
             });
         });
@@ -487,9 +597,18 @@ const App: React.FC = () => {
         ? 'Uploading & Saving...'
         : `Save Pin (${imageFiles.length} photo${imageFiles.length !== 1 ? 's' : ''})`;
 
+    const closeImageModal = () => setSelectedImageUrls(null);
+
 
     return (
         <div className="min-h-screen bg-gray-100 flex flex-col items-center p-4 sm:p-8 font-sans">
+
+            {/* Image Modal */}
+            <ImageModal
+                imageUrls={selectedImageUrls}
+                onClose={closeImageModal}
+            />
+
             <div className="w-full max-w-6xl space-y-6">
 
                 {/* Error Message Display */}
@@ -519,7 +638,6 @@ const App: React.FC = () => {
 
                 {/* Authorization Gate */}
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-gray-200 space-y-4">
-                    {/*<h2 className="text-2xl font-bold text-red-600">Authorization Required to Post</h2>*/}
                     <p className="text-gray-700">{authMessage}</p>
                     {!isAuthorizedToPost && (
                         <form className="flex space-x-2" onSubmit={(e: React.FormEvent) => { e.preventDefault(); checkAuthorizationKey(); }}>
@@ -594,8 +712,9 @@ const App: React.FC = () => {
                 {/* User Info Display */}
                 <div className="text-xs text-gray-400 text-center pt-4">
                     <span className="font-mono break-all">
-                        {isAuthReady ? `Contributor ID: ${userId || 'N/A'}` : 'Authenticating...'}
+                        {isAuthReady ? `Current User ID: ${userId || 'N/A'}` : 'Authenticating...'}
                     </span>
+                    <p>App Namespace: <span className='font-mono'>{LOCAL_APP_ID}</span></p>
                 </div>
             </div>
         </div>
