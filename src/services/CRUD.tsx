@@ -1,9 +1,77 @@
-import { collection, doc, deleteDoc, updateDoc, addDoc, Query, query, onSnapshot, type DocumentData, CollectionReference } from 'firebase/firestore';
+import { collection, query, onSnapshot, type DocumentData, CollectionReference, Query, type FirestoreError } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { firebaseInstances, LOCAL_APP_ID } from '../config/firebase.tsx';
+import { firebaseInstances, LOCAL_APP_ID, API_BASE_URL } from '../config/firebase.tsx';
 import type { Location, Memory } from '../types/Types.ts';
 
+// --- Client API Interface to Netlify Functions ---
+// Use the configurable API_BASE_URL imported from the firebase config
+const NETLIFY_FUNCTION_BASE_URL = API_BASE_URL;
 
+// 1. Authorization Endpoint
+export const checkAuthorizationKey = async (userKey: string): Promise<{ authorized: boolean; message: string }> => {
+    const response = await fetch(`${NETLIFY_FUNCTION_BASE_URL}/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // ONLY send the key here to check if it's correct
+        body: JSON.stringify({ key: userKey }),
+    });
+
+    if (!response.ok) {
+        // Handle network errors or non-2xx status codes
+        throw new Error(`Authorization API failed: ${response.statusText}`);
+    }
+
+    return response.json();
+};
+
+// 2. Add Memory Endpoint (Secure Write)
+// *** The 'authKey' parameter and the 'Authorization' header are removed! ***
+const apiAddMemory = async (
+    userId: string,
+    tempLocation: Location,
+    memoryText: string,
+    imageUrls: string[], // Expects already uploaded URLs
+): Promise<void> => {
+    const response = await fetch(`${NETLIFY_FUNCTION_BASE_URL}/save-memory`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            // No secret key in the header. Server must validate internally.
+        },
+        body: JSON.stringify({
+            userId,
+            tempLocation,
+            memoryText,
+            imageUrls,
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to save memory: ${response.status} ${response.statusText}`);
+    }
+
+    // Optional: read response body if server returns status/data
+};
+
+// 3. Delete Memory Endpoint (Secure Delete)
+// *** The 'authKey' parameter and the 'Authorization' header are removed! ***
+const apiDeleteMemory = async (id: string): Promise<void> => {
+    const response = await fetch(`${NETLIFY_FUNCTION_BASE_URL}/delete-memory`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            // No secret key in the header. Server must validate internally.
+        },
+        body: JSON.stringify({ id }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to delete memory: ${response.status} ${response.statusText}`);
+    }
+    // Optional: read response body
+};
+
+// --- Firestore Listener (READ operation, which is public) ---
 
 const getMemoryCollectionRef = (): CollectionReference<DocumentData> | null => {
     if (!firebaseInstances.db) return null;
@@ -12,12 +80,12 @@ const getMemoryCollectionRef = (): CollectionReference<DocumentData> | null => {
 };
 
 export const setupMemoriesListener = (
-    setIsAuthReady: boolean,
+    isAuthReady: boolean,
     isMapLoaded: boolean,
     setMemories: (memories: Memory[]) => void,
     setListenerError: (error: any) => void
 ) => {
-    if (!setIsAuthReady || !isMapLoaded) return () => {};
+    if (!isAuthReady || !isMapLoaded) return () => {};
 
     const memoriesCollection = getMemoryCollectionRef();
     if (!memoriesCollection) return () => {};
@@ -34,75 +102,79 @@ export const setupMemoriesListener = (
                 location: data.location,
                 contributorId: data.contributorId,
                 timestamp: data.timestamp,
-                imageUrls: data.imageUrls || [],
+                imageUrls: data.imageUrls,
             });
         });
-        setMemories(newMemories);
-
-    }, (error) => {
-        console.error("Error listening to memories:", error);
+        setMemories(newMemories.sort((a, b) => b.timestamp - a.timestamp)); // Sort newest first
+    }, (error: FirestoreError) => {
         setListenerError(error);
     });
 
     return unsubscribe;
 };
 
-export const uploadImages = async (memoryId: string, files: File[]): Promise<string[]> => {
+// Client-side image upload helper (still needed)
+const uploadImages = async (imageFiles: File[]): Promise<string[]> => {
     const storage = firebaseInstances.storage;
-    if (!storage || files.length === 0) return [];
+    if (!storage) throw new Error("Firebase Storage not initialized.");
 
     const urls: string[] = [];
-    for (const file of files) {
-        const path = `artifacts/${LOCAL_APP_ID}/memories/${memoryId}/${file.name}_${Date.now()}`;
+    for (const file of imageFiles) {
+        // Use a unique ID for the storage path
+        const path = `images/${LOCAL_APP_ID}/uploads/${crypto.randomUUID()}_${file.name}`;
         const fileRef = storageRef(storage, path);
-        await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
-        urls.push(url);
+
+        // Skip empty files
+        if (file.size === 0) continue;
+
+        try {
+            await uploadBytes(fileRef, file);
+            const url = await getDownloadURL(fileRef);
+            urls.push(url);
+        } catch (e) {
+            console.error("Error uploading image:", e);
+            // Non-fatal, just skip this image
+        }
     }
     return urls;
 };
 
-export const deleteMemory = async (id: string): Promise<void> => {
-    const db = firebaseInstances.db;
-    if (!db) throw new Error("Firestore not initialized.");
 
-    const docRef = doc(db, `artifacts/${LOCAL_APP_ID}/public/data/memories`, id);
-
-    try {
-        await deleteDoc(docRef);
-    } catch (e) {
-        console.error("Error deleting document: ", e);
-        throw new Error("Failed to delete memory pin.");
-    }
-};
-
+// --- Secured ADD operation (Client-side upload + Server-side write) ---
+// *** authKey is removed from the signature. ***
 export const addMemory = async (
     userId: string,
     tempLocation: Location,
     memoryText: string,
     imageFiles: File[],
 ): Promise<void> => {
-    const memoriesCollection = getMemoryCollectionRef();
-    if (!memoriesCollection) throw new Error("Firestore collection not initialized.");
+    let uploadedImageUrls: string[] = [];
 
-    // 1. Save basic data
-    const newMemoryData = {
-        story: memoryText.trim(),
-        location: { lat: tempLocation.lat, lng: tempLocation.lng },
-        contributorId: userId,
-        timestamp: Date.now(),
-        imageUrls: [],
-    };
-
-    const docRef = await addDoc(memoriesCollection, newMemoryData);
-    const memoryId = docRef.id;
-
-    let imageUrls: string[] = [];
+    // 1. Client-side upload of all files to Firebase Storage
     if (imageFiles.length > 0) {
-        // 2. Upload images
-        imageUrls = await uploadImages(memoryId, imageFiles);
+        uploadedImageUrls = await uploadImages(imageFiles);
+    }
 
-        // 3. Update the document with URLs
-        await updateDoc(docRef, { imageUrls: imageUrls });
+    // 2. Server-side write to Firestore via Netlify function.
+    // The server function is now solely responsible for checking authorization
+    // using its internal secret key, which is never exposed to the client.
+    await apiAddMemory(
+        userId,
+        tempLocation,
+        memoryText,
+        uploadedImageUrls,
+    );
+};
+
+// --- Secured DELETE operation (Server-side delete) ---
+// *** authKey is removed from the signature. ***
+export const deleteMemory = async (id: string): Promise<void> => {
+    try {
+        // We now call the secure API function without sending the key.
+        await apiDeleteMemory(id);
+    } catch (e) {
+        console.error("Error securing deleting document: ", e);
+        // Re-throw to allow the caller (Leaflet hook) to handle the message and authorization revocation
+        throw e;
     }
 };
