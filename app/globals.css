@@ -1,26 +1,24 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* stylelint-enable at-rule-no-unknown */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* ---------------------------------- */
+/* NEW: Leaflet CSS Import */
+@import 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+/* ---------------------------------- */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Ensure the map container has height */
+#map {
+    height: 100%;
+    min-height: 400px;
+    width: 100%;
+}
+/* Fix for Leaflet popups inside Tailwind */
+.leaflet-popup-content-wrapper {
+    @apply rounded-xl;
 }
