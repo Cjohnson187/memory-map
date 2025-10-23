@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # --- Backend Service (Node/TypeScript) ---
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: ts-backend
+    # Maps container port 8080 to host port 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      # Maps local 'backend' directory for live reloading
+      - ./backend:/usr/src/app
+      # Excludes container's node_modules from host mapping
+      - /usr/src/app/node_modules
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+    networks:
+      - fullstack-net
+
+  # --- Frontend Service (React/TypeScript with Vite) ---
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    container_name: ts-frontend
+    # Maps container port 3000 to host port 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      # Maps local 'frontend' directory for hot module replacement
+      - ./frontend:/usr/src/app
+      # Excludes container's node_modules from host mapping
+      - /usr/src/app/node_modules
+    environment:
+      # Required for stable file watching in Docker
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_PORT=0
+    depends_on:
+      - backend
+    networks:
+      - fullstack-net
+    # FIX: Installs dependencies inside the mounted volume before running the dev server
+    command: sh -c "npm install && npm run dev"
+
+networks:
+  fullstack-net:
+    driver: bridge

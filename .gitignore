@@ -170,3 +170,35 @@ dist-ssr
 
 # environemnt config
 .env.local
+
+
+## split directory project
+
+# --- General Node.js / NPM ---
+
+node_modules
+/npm-debug.log*
+/.yarn-integrity
+.DS_Store
+.env
+.env.local
+
+# --- Docker / Container Files ---
+
+# Ignore locally built images/containers metadata
+
+.docker
+
+# --- Backend (Node/TypeScript) ---
+
+/backend/node_modules
+/backend/dist    # Compiled JavaScript output
+/backend/*.tsbuildinfo
+
+# --- Frontend (React/TypeScript / Vite) ---
+
+/frontend/node_modules
+/frontend/dist   # Production build output
+/frontend/.vscode # VS Code settings specific to dev
+/frontend/.idea   # WebStorm/IntelliJ IDEA settings
+/frontend/temp    # Any temporary files created by the dev server
