@@ -4,7 +4,9 @@ import { initializeAndAuthenticate } from './services/InitializeFirebase.tsx';
 import { ImageModal } from './components/ImageViewer.tsx';
 import { useLeafletMap } from './hooks/Leaflet.tsx';
 import type { Memory, Location } from './types/Types.ts';
-import { AUTHORIZATION_KEY, LOCAL_APP_ID } from './config/firebase.tsx';
+import { LOCAL_APP_ID } from './config/firebase.tsx';
+import { checkAuthorizationKeySecurely } from './services/AuthService.tsx';
+import firebase from 'firebase/compat/app';
 
 // --- Main React Component ---
 const App: React.FC = () => {
@@ -27,7 +29,7 @@ const App: React.FC = () => {
     const [authMessage, setAuthMessage] = useState<string>('Enter the family key to add new pins.');
 
     // Function to handle errors from Firestore listener
-    const setListenerError = (error: any) => {
+    const setListenerError = (error: firebase.firestore.FirestoreError) => {
         setErrorMessage("Real-time data synchronization failed. Check console for details. " + error.toLocaleString());
     };
 
@@ -80,18 +82,34 @@ const App: React.FC = () => {
             setErrorMessage(null);
         }
     };
+    const checkAuthorizationKey = async (): Promise<void> => {
+        if (authKeyInput.trim() === '') return;
+        setAuthMessage('Checking key...');
+        setErrorMessage(null);
 
-    const checkAuthorizationKey = (): void => {
-        if (authKeyInput === AUTHORIZATION_KEY) {
+        // Call the secure Cloud Function
+        const result = await checkAuthorizationKeySecurely(authKeyInput);
+
+        if (result.authorized) {
             setIsAuthorizedToPost(true);
-            setAuthMessage('Authorization successful! You can now select a location on the map to add a memory pin.');
+            setAuthMessage('Authorization successful!');
             setAuthKeyInput('');
-            setErrorMessage(null);
         } else {
             setIsAuthorizedToPost(false);
             setAuthMessage('Invalid key. Please try again.');
         }
     };
+    // const checkAuthorizationKey = (): void => {
+    //     if (authKeyInput === AUTHORIZATION_KEY) {
+    //         setIsAuthorizedToPost(true);
+    //         setAuthMessage('Authorization successful! You can now select a location on the map to add a memory pin.');
+    //         setAuthKeyInput('');
+    //         setErrorMessage(null);
+    //     } else {
+    //         setIsAuthorizedToPost(false);
+    //         setAuthMessage('Invalid key. Please try again.');
+    //     }
+    // };
 
 
     // --- 4. ADD MEMORY OPERATION ---

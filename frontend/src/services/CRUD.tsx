@@ -1,9 +1,38 @@
-import { collection, doc, deleteDoc, updateDoc, addDoc, Query, query, onSnapshot, type DocumentData, CollectionReference } from 'firebase/firestore';
+import { collection, doc, deleteDoc, Query, query, onSnapshot, type DocumentData, CollectionReference } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { firebaseInstances, LOCAL_APP_ID } from '../config/firebase.tsx';
-import type { Location, Memory } from '../types/Types.ts';
+import type {AddMemoryRequest, Location, Memory} from '../types/Types.ts';
 
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import firebase from "firebase/compat/app";
 
+// for local tests
+import { connectFunctionsEmulator } from 'firebase/functions';
+
+// const functions = getFunctions(firebaseInstances.app);
+
+// if (import.meta.env.DEV) {
+//     // The default Functions emulator port is 5001
+//     connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+// }
+
+// Helper to get the functions instance (similar to AuthService)
+const getFunctionsInstance = () => {
+    if (!firebaseInstances.app) throw new Error("Firebase app not initialized.");
+
+    const functions = getFunctions(firebaseInstances.app);
+
+    if (import.meta.env.DEV) {
+
+        // in case hot-reloading tries to connect the emulator multiple times.
+        try {
+            connectFunctionsEmulator(functions, "localhost", 5001);
+        } catch (e) {
+            console.error("Emulator already connected:", e);
+        }
+    }
+    return functions;
+};
 
 const getMemoryCollectionRef = (): CollectionReference<DocumentData> | null => {
     if (!firebaseInstances.db) return null;
@@ -15,7 +44,7 @@ export const setupMemoriesListener = (
     setIsAuthReady: boolean,
     isMapLoaded: boolean,
     setMemories: (memories: Memory[]) => void,
-    setListenerError: (error: any) => void
+    setListenerError: (error: firebase.firestore.FirestoreError) => void
 ) => {
     if (!setIsAuthReady || !isMapLoaded) return () => {};
 
@@ -77,32 +106,38 @@ export const deleteMemory = async (id: string): Promise<void> => {
 };
 
 export const addMemory = async (
-    userId: string,
+    userId: string, // Still needed for the image upload path
     tempLocation: Location,
     memoryText: string,
     imageFiles: File[],
 ): Promise<void> => {
-    const memoriesCollection = getMemoryCollectionRef();
-    if (!memoriesCollection) throw new Error("Firestore collection not initialized.");
-
-    // 1. Save basic data
-    const newMemoryData = {
-        story: memoryText.trim(),
-        location: { lat: tempLocation.lat, lng: tempLocation.lng },
-        contributorId: userId,
-        timestamp: Date.now(),
-        imageUrls: [],
-    };
-
-    const docRef = await addDoc(memoriesCollection, newMemoryData);
-    const memoryId = docRef.id;
-
+    // We use a temporary ID or the userId for the image path since we don't have the final memory ID yet.
     let imageUrls: string[] = [];
     if (imageFiles.length > 0) {
-        // 2. Upload images
-        imageUrls = await uploadImages(memoryId, imageFiles);
+        // Upload path should use something unique or temporary until the final memoryId is known
+        imageUrls = await uploadImages(userId, imageFiles);
+    }
 
-        // 3. Update the document with URLs
-        await updateDoc(docRef, { imageUrls: imageUrls });
+    // 2. Call the Cloud Function to perform the secure write
+    const functionsInstance = getFunctionsInstance();
+    const addMemoryCF = httpsCallable<AddMemoryRequest, { success: boolean, memoryId: string }>(
+        functionsInstance,
+        'addMemoryFunction'
+    );
+
+    const memoryDataToSend: AddMemoryRequest = {
+        // The key is NOT sent
+        location: tempLocation,
+        story: memoryText,
+        imageUrls,
+    };
+
+    try {
+        // The request token automatically includes the user's UID for server-side verification
+        await addMemoryCF(memoryDataToSend);
+    } catch (e) {
+        console.error("Error calling addMemoryFunction:", e);
+        // Throw an error that App.tsx can catch and display
+        throw new Error("Failed to securely add memory. Check authorization status.");
     }
 };
