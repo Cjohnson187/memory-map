@@ -9,12 +9,6 @@ import firebase from "firebase/compat/app";
 // for local tests
 import { connectFunctionsEmulator } from 'firebase/functions';
 
-// const functions = getFunctions(firebaseInstances.app);
-
-// if (import.meta.env.DEV) {
-//     // The default Functions emulator port is 5001
-//     connectFunctionsEmulator(functions, "127.0.0.1", 5001);
-// }
 
 // Helper to get the functions instance (similar to AuthService)
 const getFunctionsInstance = () => {
@@ -27,8 +21,8 @@ const getFunctionsInstance = () => {
         // in case hot-reloading tries to connect the emulator multiple times.
         try {
             connectFunctionsEmulator(functions, "localhost", 5001);
-        } catch (e) {
-            console.error("Emulator already connected:", e);
+        } catch (error) {
+            console.error("Emulator already connected:", error);
         }
     }
     return functions;
@@ -106,38 +100,38 @@ export const deleteMemory = async (id: string): Promise<void> => {
 };
 
 export const addMemory = async (
-    userId: string, // Still needed for the image upload path
+    userId: string, // No longer strictly needed but harmless
     tempLocation: Location,
     memoryText: string,
     imageFiles: File[],
 ): Promise<void> => {
-    // We use a temporary ID or the userId for the image path since we don't have the final memory ID yet.
     let imageUrls: string[] = [];
+
+    // IMPORTANT: Temporarily use the userId for the image upload path
+    // until we figure out how to do it securely on the server side.
+    // For now, keep the image upload in the frontend.
     if (imageFiles.length > 0) {
-        // Upload path should use something unique or temporary until the final memoryId is known
-        imageUrls = await uploadImages(userId, imageFiles);
+        imageUrls = await uploadImages(userId, imageFiles); // ⬅️ This is okay to keep for now
     }
 
     // 2. Call the Cloud Function to perform the secure write
     const functionsInstance = getFunctionsInstance();
     const addMemoryCF = httpsCallable<AddMemoryRequest, { success: boolean, memoryId: string }>(
         functionsInstance,
-        'addMemoryFunction'
+        'addMemoryFunction' // ⬅️ Call the function that performs the secure check and write
     );
 
     const memoryDataToSend: AddMemoryRequest = {
-        // The key is NOT sent
         location: tempLocation,
         story: memoryText,
-        imageUrls,
+        imageUrls: imageUrls, // Send the URLs to the function
     };
 
     try {
-        // The request token automatically includes the user's UID for server-side verification
         await addMemoryCF(memoryDataToSend);
     } catch (e) {
         console.error("Error calling addMemoryFunction:", e);
-        // Throw an error that App.tsx can catch and display
+        // The error you saw is thrown here by the backend function's security logic
         throw new Error("Failed to securely add memory. Check authorization status.");
     }
 };

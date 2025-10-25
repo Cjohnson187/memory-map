@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write only if the user is signed in
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // You will later refine this to only allow writes to 'memories'
+    // from the Cloud Function (using request.auth.uid == 'YOUR_SERVICE_ACCOUNT_UID')
+    // but for now, this minimum ensures compilation passes.
+  }
+}

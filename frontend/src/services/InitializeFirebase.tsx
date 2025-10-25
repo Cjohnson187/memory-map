@@ -1,12 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence, onAuthStateChanged, type Auth, type User, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { firebaseConfig, firebaseInstances, } from '../config/firebase.tsx';
 
 // --- INITIALIZATION ---
 export const initializeAndAuthenticate = async (
-    setUserId: (id: string) => void,
+    setUserId: (id: string | null) => void,
     setIsAuthReady: (ready: boolean) => void,
     setErrorMessage: (message: string | null) => void
 ) => {
@@ -20,6 +20,15 @@ export const initializeAndAuthenticate = async (
         const authInstance: Auth = firebaseInstances.auth;
         if (!authInstance) return () => {};
 
+        if (import.meta.env.DEV) {
+            try {
+                // The Auth Emulator runs on port 9099
+                connectAuthEmulator(authInstance, "http://localhost:9099");
+            } catch (error) {
+                console.error("Emulator already connected:", error);
+            }
+        }
+
         await setPersistence(authInstance, browserSessionPersistence);
         await signInAnonymously(authInstance);
 
@@ -27,7 +36,7 @@ export const initializeAndAuthenticate = async (
             if (user) {
                 setUserId(user.uid);
             } else {
-                setUserId(crypto.randomUUID());
+                setUserId(null);
             }
             setIsAuthReady(true);
         });
