@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence, onAuthStateChanged, type Auth, type User, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { firebaseConfig, firebaseInstances, } from '../config/firebase.tsx';
 
@@ -24,6 +24,7 @@ export const initializeAndAuthenticate = async (
             try {
                 // The Auth Emulator runs on port 9099
                 connectAuthEmulator(authInstance, "http://localhost:9099");
+                connectFirestoreEmulator(firebaseInstances.db, "localhost", 8080);
             } catch (error) {
                 console.error("Emulator already connected:", error);
             }

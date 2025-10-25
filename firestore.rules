@@ -1,13 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write only if the user is signed in
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // RULE FOR PUBLIC MEMORY DATA (Memory Listener)
+    // Allow anyone to read the data, but only authorized users can write.
+    // The write rule will be controlled by the Cloud Function
+    match /artifacts/{appId}/public/data/memories/{memoryId} {
+      allow read: if true;
+      allow write: if false;
     }
 
-    // You will later refine this to only allow writes to 'memories'
-    // from the Cloud Function (using request.auth.uid == 'YOUR_SERVICE_ACCOUNT_UID')
-    // but for now, this minimum ensures compilation passes.
+    // RULE FOR AUTHORIZED USERS (Function Check)
+    // This must allow the Cloud Function (which acts as admin) to read/write.
+    // The emulator treats Admin SDK calls as authenticated/trusted.
+    match /authorizedUsers/{userId} {
+      allow read, write: if true;
+    }
+
+    // Optional: General fallback rule (often useful for debugging)
+    match /{document=**} {
+        allow read, write: if false;
+    }
   }
 }

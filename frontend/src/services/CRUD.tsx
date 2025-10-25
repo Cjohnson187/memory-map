@@ -35,12 +35,11 @@ const getMemoryCollectionRef = (): CollectionReference<DocumentData> | null => {
 };
 
 export const setupMemoriesListener = (
-    setIsAuthReady: boolean,
     isMapLoaded: boolean,
     setMemories: (memories: Memory[]) => void,
     setListenerError: (error: firebase.firestore.FirestoreError) => void
 ) => {
-    if (!setIsAuthReady || !isMapLoaded) return () => {};
+    if (!isMapLoaded) return () => {};
 
     const memoriesCollection = getMemoryCollectionRef();
     if (!memoriesCollection) return () => {};
@@ -100,38 +99,37 @@ export const deleteMemory = async (id: string): Promise<void> => {
 };
 
 export const addMemory = async (
-    userId: string, // No longer strictly needed but harmless
+    userId: string, // Used for image upload path
     tempLocation: Location,
     memoryText: string,
     imageFiles: File[],
 ): Promise<void> => {
     let imageUrls: string[] = [];
 
-    // IMPORTANT: Temporarily use the userId for the image upload path
-    // until we figure out how to do it securely on the server side.
-    // For now, keep the image upload in the frontend.
+    // 1. Upload images on the client side first (Storage rules will need to allow this)
     if (imageFiles.length > 0) {
-        imageUrls = await uploadImages(userId, imageFiles); // ⬅️ This is okay to keep for now
+        imageUrls = await uploadImages(userId, imageFiles);
     }
 
     // 2. Call the Cloud Function to perform the secure write
     const functionsInstance = getFunctionsInstance();
     const addMemoryCF = httpsCallable<AddMemoryRequest, { success: boolean, memoryId: string }>(
         functionsInstance,
-        'addMemoryFunction' // ⬅️ Call the function that performs the secure check and write
+        'addMemoryFunction' // The function that handles secure Firestore write
     );
 
     const memoryDataToSend: AddMemoryRequest = {
         location: tempLocation,
         story: memoryText,
-        imageUrls: imageUrls, // Send the URLs to the function
+        imageUrls: imageUrls, // Send the publicly accessible URLs to the function
     };
 
     try {
+        // The user's Auth token is automatically attached to this request.
         await addMemoryCF(memoryDataToSend);
     } catch (e) {
         console.error("Error calling addMemoryFunction:", e);
-        // The error you saw is thrown here by the backend function's security logic
+        // Throw an error that App.tsx can catch and display
         throw new Error("Failed to securely add memory. Check authorization status.");
     }
 };
