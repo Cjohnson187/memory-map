@@ -16,6 +16,20 @@
       ]
     }
   ],
+  "hosting": {
+    "public": "frontend/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
   "firestore": {
     "rules": "firestore.rules"
   },
@@ -31,6 +45,9 @@
     },
     "ui": {
       "port": 4000
+    },
+    "storage": {
+      "port": 9199
     }
   }
 }
