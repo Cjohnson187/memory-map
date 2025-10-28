@@ -4,7 +4,6 @@ import { firebaseInstances, LOCAL_APP_ID } from '../config/firebase.tsx';
 import type {AddMemoryRequest, Location, Memory} from '../types/Types.ts';
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import firebase from "firebase/compat/app";
 
 // for local tests
 import { connectFunctionsEmulator } from 'firebase/functions';
@@ -37,7 +36,7 @@ const getMemoryCollectionRef = (): CollectionReference<DocumentData> | null => {
 export const setupMemoriesListener = (
     isMapLoaded: boolean,
     setMemories: (memories: Memory[]) => void,
-    setListenerError: (error: firebase.firestore.FirestoreError) => void
+    setListenerError: (error: Error) => void
 ) => {
     if (!isMapLoaded) return () => {};
 

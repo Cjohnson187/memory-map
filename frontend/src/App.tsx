@@ -6,7 +6,6 @@ import { useLeafletMap } from './hooks/Leaflet.tsx';
 import type { Memory, Location } from './types/Types.ts';
 import { LOCAL_APP_ID } from './config/firebase.tsx';
 import { checkAuthorizationKeySecurely } from './services/AuthService.tsx';
-import firebase from 'firebase/compat/app';
 
 // --- Main React Component ---
 const App: React.FC = () => {
@@ -29,7 +28,7 @@ const App: React.FC = () => {
     const [authMessage, setAuthMessage] = useState<string>('Enter the family key to add new pins.');
 
     // Function to handle errors from Firestore listener
-    const setListenerError = (error: firebase.firestore.FirestoreError) => {
+    const setListenerError = (error: Error) => {
         setErrorMessage("Real-time data synchronization failed. Check console for details. " + error.toLocaleString());
     };
 
@@ -68,9 +67,9 @@ const App: React.FC = () => {
     // --- 2. Real-time Listener for Memories ---
     useEffect(() => {
         // Setup the onSnapshot listener for memories when Auth and Map are ready
-        const unsubscribe = setupMemoriesListener(isAuthReady, isMapLoaded, setMemories, setListenerError);
+        const unsubscribe = setupMemoriesListener(isMapLoaded, setMemories, setListenerError);
         return () => unsubscribe();
-    }, [isAuthReady, isMapLoaded]);
+    }, [isMapLoaded]);
 
 
     // --- 3. FILE AND AUTHORIZATION HANDLERS ---

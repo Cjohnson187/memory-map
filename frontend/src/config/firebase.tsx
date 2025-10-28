@@ -22,7 +22,7 @@ export const firebaseConfig = {
 export const LOCAL_APP_ID =  import.meta.env.VITE_FIREBASE_LOCAL_APP_ID;
 
 // Authorization Key (For posting memories - CHANGE THIS SECRET KEY)
-// export const AUTHORIZATION_KEY = import.meta.env.VITE_FIREBASE_AUTH_KEY; // Placeholder
+export const AUTHORIZATION_KEY = import.meta.env.VITE_FIREBASE_AUTH_KEY; // Placeholder
 
 // --- Firebase Instance Refs (Managed globally within the service layer) ---
 interface FirebaseInstances {
