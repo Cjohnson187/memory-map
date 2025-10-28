@@ -73,7 +73,7 @@ export const addMemoryFunction = onCall(
         if (!authDoc.exists) {
             throw new HttpsError("permission-denied", "User is not authorized to create memories.");
         }
-        const LOCAL_APP_ID = "memory-map-v1";
+        const LOCAL_APP_ID = "memory-map-sr";
         const collectionPath = `artifacts/${LOCAL_APP_ID}/public/data/memories`;
 
         const newMemoryData = {

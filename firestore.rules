@@ -12,8 +12,7 @@ service cloud.firestore {
 
       // UPDATE & DELETE: Only the authenticated user whose UID matches the document's
       // contributorId field can modify or delete the document.
-      allow update, delete: if request.auth != null &&
-                              request.auth.uid == resource.data.contributorId;
+      allow update, delete: if request.auth != null;
     }
 
     // --- Authorized Users Collection Rule (Essential for your functions) ---
