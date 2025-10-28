@@ -1,6 +1,6 @@
 import { getFunctions, httpsCallable } from 'firebase/functions';
 // NOTE: Make sure your InitializeFirebase has run and firebaseInstances.app is set
-import { firebaseInstances } from '../config/firebase.tsx';
+import { firebaseInstances } from '../config/firebase.ts';
 
 // for local tests
 import { connectFunctionsEmulator } from 'firebase/functions';

@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence, onAuthStateChanged, type Auth, type User, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { firebaseConfig, firebaseInstances, } from '../config/firebase.tsx';
+import { firebaseConfig, firebaseInstances, } from '../config/firebase.ts';
 
 // --- INITIALIZATION ---
 export const initializeAndAuthenticate = async (

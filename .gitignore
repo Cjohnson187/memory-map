@@ -184,3 +184,5 @@ backend/typings/
 # Node.js dependency directory
 backend/node_modules/
 *.local
+
+backend/functions/.env

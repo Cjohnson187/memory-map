@@ -1,6 +1,6 @@
 import { collection, doc, deleteDoc, Query, query, onSnapshot, type DocumentData, CollectionReference } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { firebaseInstances, LOCAL_APP_ID } from '../config/firebase.tsx';
+import { firebaseInstances, LOCAL_APP_ID } from '../config/firebase.ts';
 import type {AddMemoryRequest, Location, Memory} from '../types/Types.ts';
 
 import { getFunctions, httpsCallable } from 'firebase/functions';

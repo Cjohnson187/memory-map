@@ -6,14 +6,18 @@
  *
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
-import {initializeApp} from "firebase-admin/app";
+
 import {setGlobalOptions} from "firebase-functions";
+import * as logger from "firebase-functions/logger";
+import {initializeApp} from "firebase-admin/app";
 // Check auth key imports
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {defineSecret} from "firebase-functions/params";
 // AddMemory imports
 import admin from "firebase-admin";
 import {getFirestore} from "firebase-admin/firestore";
+
+// this will be the maximum concurrent request count.
 
 setGlobalOptions({maxInstances: 5});
 
@@ -24,10 +28,10 @@ const authKeySecret = defineSecret("AUTH_KEY");
 
 export const checkAuthKey = onCall(
     {secrets: [authKeySecret]},
-    async (request) => { // 💡 MUST be async now
+    async (request) => {
         const submittedKey = request.data.key;
-        const secretKey = authKeySecret.value();
-
+        const secretKey = authKeySecret.value(); // replace with authKeySecret for prod
+        logger.info("Checking auth key...");
         if (submittedKey && submittedKey === secretKey) {
             const db = getFirestore();
             const userId = request.auth?.uid; // Use optional chaining for safety

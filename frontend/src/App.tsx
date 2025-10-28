@@ -4,7 +4,7 @@ import { initializeAndAuthenticate } from './services/InitializeFirebase.tsx';
 import { ImageModal } from './components/ImageViewer.tsx';
 import { useLeafletMap } from './hooks/Leaflet.tsx';
 import type { Memory, Location } from './types/Types.ts';
-import { LOCAL_APP_ID } from './config/firebase.tsx';
+import { LOCAL_APP_ID } from './config/firebase.ts';
 import { checkAuthorizationKeySecurely } from './services/AuthService.tsx';
 
 // --- Main React Component ---
