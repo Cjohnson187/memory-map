@@ -1,22 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Location, LeafletMap, LeafletLayer, Memory } from '../types/Types.ts';
 import { deleteMemory } from '../services/CRUD';
+// import leaflet types and events
+import L, { Icon, type LeafletMouseEvent} from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-// Assumed global L variable from the Leaflet script load
-declare const L: any;
 
 // --- Custom Leaflet Icons (Base64 SVG) ---
 const createIcons = () => {
-    if (typeof L === 'undefined') return { tempIcon: null, memorialIcon: null };
-
-    const tempIcon = new L.Icon({
+    // We use the imported 'Icon' class instead of L.Icon
+    const tempIcon = new Icon({
         iconUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="%233b82f6" stroke-width="2"><circle cx="16" cy="16" r="14" fill="%233b82f6" stroke="white" stroke-width="3"/><path d="M16 8v16M8 16h16" stroke="white" stroke-width="3"/></svg>',
         iconSize: [32, 32],
         iconAnchor: [16, 32],
         popupAnchor: [0, -28]
     });
 
-    const memorialIcon = new L.Icon({
+    const memorialIcon = new Icon({
         iconUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%235b21b6" stroke="%23ffffff" stroke-width="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zM12 11.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>',
         iconSize: [38, 38],
         iconAnchor: [19, 38],
@@ -60,8 +60,8 @@ export const useLeafletMap = ({
 
 
     // Map Click Handler (to place temporary pin)
-    const handleMapClick = useCallback((e: any): void => {
-        if (typeof L === 'undefined' || !mapRef.current) return;
+    const handleMapClick = useCallback((e: LeafletMouseEvent): void => {
+        if (!mapRef.current) return;
 
         if (!authStatusRef.current) {
             setAuthMessage("You must be authorized to select a location for a new pin.");
@@ -69,7 +69,7 @@ export const useLeafletMap = ({
         }
 
         const newLoc: Location = { lat: e.latlng.lat, lng: e.latlng.lng };
-        // This is where we update the state in the App component to show the form
+        // update the state in the App component to show the form
         setTempLocation(newLoc);
 
         const { tempIcon } = createIcons();
@@ -84,7 +84,8 @@ export const useLeafletMap = ({
 
     // Setup and Initialization of the Leaflet Map
     const setupMap = useCallback((): void => {
-        if (mapRef.current || typeof L === 'undefined' || typeof L.map !== 'function' || !document.getElementById('map')) return;
+        // FIX: Removed L check (L is now imported and guaranteed to be present)
+        if (mapRef.current || !document.getElementById('map')) return;
 
         const map = L.map('map').setView([20, 0], 2);
         mapRef.current = map;
@@ -98,58 +99,23 @@ export const useLeafletMap = ({
 
         map.on('click', handleMapClick);
 
+        setIsMapLoaded(true); // FIX: Set map loaded state here
+
         setTimeout(() => map.invalidateSize(), 100);
 
     }, [handleMapClick]);
 
 
-    // Dynamic Leaflet Loading
+    // FIX: Simplified the map setup effect (Removed the dynamic loading logic)
     useEffect(() => {
-        // ... (Leaflet CSS and JS loading functions from the original code)
-        const loadLeafletCss = (): void => {
-            if (document.querySelector('link[href*="leaflet.css"]')) return;
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-            document.head.appendChild(link);
-        };
-
-        const loadLeafletJs = (): void => {
-            if (typeof L !== 'undefined' && typeof L.map === 'function') {
-                setIsMapLoaded(true);
-                return;
-            }
-            if (document.querySelector('script[src*="leaflet.js"]')) return;
-
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-            script.async = false;
-
-            script.onload = () => {
-                if (typeof L !== 'undefined' && typeof L.map === 'function') {
-                    setIsMapLoaded(true);
-                } else {
-                    console.error("Leaflet script loaded, but L.map is still unavailable.");
-                }
-            };
-            document.head.appendChild(script);
-        };
-
-        loadLeafletCss();
-        loadLeafletJs();
-    }, []);
-
-    // Effect to run map setup when Leaflet is loaded
-    useEffect(() => {
-        if (isMapLoaded) {
-            setupMap();
-        }
-    }, [isMapLoaded, setupMap]);
+        setupMap();
+    }, [setupMap]);
 
 
     // Marker Rendering Effect
     useEffect(() => {
-        if (!mapRef.current || !markerLayerRef.current || typeof L === 'undefined') return;
+        // FIX: Removed L check (L is now imported)
+        if (!mapRef.current || !markerLayerRef.current) return;
 
         markerLayerRef.current.clearLayers();
         const { memorialIcon } = createIcons();
@@ -207,7 +173,8 @@ export const useLeafletMap = ({
                         deleteButton.onclick = async () => {
                             try {
                                 await deleteMemory(memory.id);
-                            } catch(e) {
+                            } catch(error) {
+                                console.error("Failed to delete memory pin. " + error);
                                 setErrorMessage("Failed to delete memory pin.");
                             }
                         };

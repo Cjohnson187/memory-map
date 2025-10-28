@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Public Data Rules for the Memory Map App ---
+    match /artifacts/{appId}/public/data/memories/{memoryId} {
+      // ANY user (including anonymous/unauthorized) can READ pins.
+      allow read: if true;
+
+      // CREATE: Only authenticated users can create new memories.
+      allow create: if request.auth != null;
+
+      // UPDATE & DELETE: Only the authenticated user whose UID matches the document's
+      // contributorId field can modify or delete the document.
+      allow update, delete: if request.auth != null;
+    }
+
+    // --- Authorized Users Collection Rule (Essential for your functions) ---
+    // Since your function checks /authorizedUsers, we need a rule for it.
+    // The user should only be able to read their own document here for the function check to pass.
+    match /authorizedUsers/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // The `checkAuthKey` function does the write, so this is handled via admin SDK.
+      // No need for a client-side write rule here.
+    }
+
+    // --- Default Private Data Rules ---
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

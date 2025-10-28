@@ -12,6 +12,12 @@ export interface Memory {
     imageUrls: string[];
 }
 
+export interface AddMemoryRequest {
+    location: { lat: number; lng: number };
+    story: string;
+    imageUrls: string[];
+}
+
 // Global types for Leaflet instances
 export type LeafletMap = any;
 export type LeafletLayer = any;
