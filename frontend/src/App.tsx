@@ -200,7 +200,7 @@ const App: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-gray-200 space-y-4">
                     <p className="text-gray-700">{authMessage}</p>
                     {!isAuthorizedToPost && (
-                        <form className="flex space-x-2" onSubmit={(e: React.FormEvent) => { e.preventDefault(); checkAuthorizationKey(); }}>
+                        <form className="flex flex-col space-y-4 sm:flex-row sm:space-x-4 sm:space-y-0" onSubmit={(e: React.FormEvent) => { e.preventDefault(); checkAuthorizationKey(); }}>
                             <input
                                 type="password"
                                 value={authKeyInput}
@@ -214,7 +214,7 @@ const App: React.FC = () => {
                             <button
                                 type="submit"
                                 disabled={authKeyInput.length === 0}
-                                className="px-5 py-3 bg-red-600 text-white font-semibold rounded-xl shadow-md hover:bg-red-700 transition duration-150 disabled:opacity-50"
+                                className="w-full sm:w-auto flex-shrink-0 px-5 py-3 bg-red-600 text-white font-semibold rounded-xl shadow-md hover:bg-red-700 transition duration-150 disabled:opacity-50"
                             >
                                 Authorize
                             </button>
